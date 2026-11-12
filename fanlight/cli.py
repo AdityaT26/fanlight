@@ -6,6 +6,7 @@ import argparse
 import json
 import logging
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 from . import __version__
@@ -15,10 +16,22 @@ _COLOURS = ["\033[95m", "\033[93m", "\033[96m", "\033[92m", "\033[94m", "\033[91
 _RESET, _DIM, _BOLD = "\033[0m", "\033[2m", "\033[1m"
 
 
-def _engine(args: argparse.Namespace):
-    from .engine import Engine
-
+def _settings(args: argparse.Namespace) -> Settings:
     settings = Settings.from_env()
+    changes: dict = {}
+    if getattr(args, "public", False):
+        changes["public"] = True
+    if getattr(args, "refresh_minutes", None):
+        changes["refresh_minutes"] = args.refresh_minutes
+    if getattr(args, "feeds", None):
+        changes["feeds_path"] = Path(args.feeds)
+    return replace(settings, **changes) if changes else settings
+
+
+def _engine(args: argparse.Namespace):
+    from .engine import Engine  # imported late to keep --help fast
+
+    settings = _settings(args)
     return Engine.load(
         settings,
         demo=getattr(args, "demo", False),
@@ -45,8 +58,62 @@ def cmd_serve(args: argparse.Namespace) -> int:
     from .api import create_app
 
     engine = _engine(args)
+    refresher = None
+    if engine.live is not None:
+        from .live import Refresher
+
+        refresher = Refresher(engine.live, engine.rebuild, engine.settings.refresh_minutes)
+        refresher.start()
+        print(
+            f"Live news: {len(engine.live.feeds)} feeds, refreshing every "
+            f"{engine.settings.refresh_minutes:g} minutes{', public mode' if engine.settings.public else ''}"
+        )
     print(f"Fanlight {__version__}: {engine.index.size} stories, open http://{args.host}:{args.port}")
-    uvicorn.run(create_app(engine), host=args.host, port=args.port, log_level="warning")
+    try:
+        uvicorn.run(create_app(engine), host=args.host, port=args.port, log_level="warning")
+    finally:
+        if refresher is not None:
+            refresher.stop()
+    return 0
+
+
+def cmd_fetch(args: argparse.Namespace) -> int:
+    from .feeds import load_feeds
+    from .live import LiveNews
+    from .store import Store
+
+    settings = _settings(args)
+    live = LiveNews(Store(settings.db_path), load_feeds(settings.feeds_path), settings.retention_days)
+    report = live.refresh()
+    if args.json:
+        print(json.dumps(report.as_dict(), indent=2))
+    else:
+        print(report.summary())
+        print(f"{live.store.live_count()} stories stored in {settings.db_path}")
+    return 0 if report.ok else 1
+
+
+def cmd_feeds(args: argparse.Namespace) -> int:
+    from .feeds import load_feeds
+    from .live import LiveNews
+    from .store import Store
+
+    settings = _settings(args)
+    status = LiveNews(
+        Store(settings.db_path), load_feeds(settings.feeds_path), settings.retention_days
+    ).status()
+    if args.json:
+        print(json.dumps(status, indent=2, ensure_ascii=False))
+        return 0
+    for feed in status["feeds"]:
+        if feed["last_error"]:
+            state = f"failing: {feed['last_error']}"
+        elif feed["last_success"]:
+            state = f"ok, {feed['items']} stories in the last fetch"
+        else:
+            state = "not fetched yet"
+        print(f"{feed['id']:<22} {feed['outlet']:<20} {feed['language']:<8} {feed['category']:<14} {state}")
+    print(f"\n{status['stories']} stories stored. Run 'fanlight fetch' to refresh now.")
     return 0
 
 
@@ -175,14 +242,30 @@ def build_parser() -> argparse.ArgumentParser:
         if data:
             sub.add_argument("--demo", action="store_true", help="use the built-in synthetic newsroom")
             sub.add_argument(
-                "--source", choices=["json", "mongo"], default="json", help="where to read data from"
+                "--source",
+                choices=["json", "live", "mongo"],
+                default="json",
+                help="json: dataset files; live: news feeds; mongo: MongoDB",
             )
+            sub.add_argument("--feeds", help="feed list for --source live (TOML)")
             sub.add_argument("--rebuild", action="store_true", help="ignore the index cache")
         return sub
 
     serve = add("serve", cmd_serve, "Run the web app and API")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8000)
+    serve.add_argument("--public", action="store_true", help="each browser sees only the readers it created")
+    serve.add_argument(
+        "--refresh-minutes", type=float, default=None, help="live mode: minutes between refreshes"
+    )
+
+    fetch = add("fetch", cmd_fetch, "Fetch the news feeds once and store new stories", data=False)
+    fetch.add_argument("--feeds", help="feed list (TOML)")
+    fetch.add_argument("--json", action="store_true")
+
+    feeds = add("feeds", cmd_feeds, "Show the news feeds and how their last fetch went", data=False)
+    feeds.add_argument("--feeds", help="feed list (TOML)")
+    feeds.add_argument("--json", action="store_true")
 
     index = add("index", cmd_index, "Build the index and print corpus statistics")
     index.add_argument("--json", action="store_true")

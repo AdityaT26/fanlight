@@ -12,6 +12,8 @@ const SIGNAL_NAMES = {
 const MIX_COLOURS = ["#D9B46A", "#C58BEA", "#8E6BBF", "#E3CFA1", "#6B4B94", "#F0B5D0", "#A78A55", "#5B3C80"];
 const HALF_LIFE = { min: 6, max: 24 * 30 }; // hours, log scale on the slider
 const STORAGE_KEY = "fanlight:v1";
+const MY_READERS_KEY = "fanlight:readers";
+const META_POLL_MS = 2 * 60 * 1000;
 const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 const state = {
@@ -48,6 +50,18 @@ const el = (tag, attrs = {}, ...children) => {
 
 function loadPrefs() {
   try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; } catch { return {}; }
+}
+/* Readers created in this browser. In public mode these ids are the only way
+   back to them, because the server will not list anybody's readers. */
+function myReaders() {
+  try { return JSON.parse(localStorage.getItem(MY_READERS_KEY)) || []; } catch { return []; }
+}
+function rememberReader(id, keep = true) {
+  try {
+    const ids = myReaders().filter((x) => x !== id);
+    if (keep) ids.unshift(id);
+    localStorage.setItem(MY_READERS_KEY, JSON.stringify(ids.slice(0, 20)));
+  } catch { /* storage unavailable */ }
 }
 function savePrefs() {
   try {
@@ -281,13 +295,36 @@ async function deleteReader() {
   const name = state.feed?.reader?.name || "this reader";
   if (!window.confirm(`Delete ${name} and their history?`)) return;
   await api(`/api/readers/${state.readerId}`, { method: "DELETE" });
+  rememberReader(state.readerId, false);
   await refreshReaders();
-  selectReader(state.readers[0]?.id);
   toast(`Deleted ${name}`);
+  if (state.readers.length) selectReader(state.readers[0].id);
+  else showWelcome();
 }
 
 async function refreshReaders() {
-  state.readers = await api("/api/readers?limit=80");
+  const mine = myReaders();
+  const own = mine.length ? await api(`/api/readers?ids=${encodeURIComponent(mine.join(","))}`) : [];
+  const listed = state.meta?.public ? [] : await api("/api/readers?limit=80");
+  const ownIds = new Set(own.map((r) => r.id));
+  state.readers = [...own, ...listed.filter((r) => !ownIds.has(r.id))];
+}
+
+function showWelcome() {
+  state.readerId = null;
+  state.feed = null;
+  renderReaderSelect();
+  $("#reader-card").replaceChildren();
+  $("#edition").textContent = editionLine();
+  $("#shape").replaceChildren(el("p", { class: "shape-note", text: "Create a reader to see the shape of their feed." }));
+  $("#feed-foot").textContent = "";
+  $("#feed-list").replaceChildren(
+    el("li", { class: "empty welcome" },
+      el("h3", { text: "Make your feed" }),
+      el("p", { text: "Pick a language and a few topics. Fanlight ranks today's stories for you and learns from what you open, like, save or skip." }),
+      el("button", { type: "button", class: "button", text: "Pick my topics", onclick: () => openReaderDialog(true) }),
+    ),
+  );
 }
 
 function selectReader(id) {
@@ -296,6 +333,15 @@ function selectReader(id) {
   savePrefs();
   renderReaderSelect();
   loadFeed({ animate: false });
+}
+
+function openReaderDialog(welcome) {
+  const form = $("#reader-form");
+  form.reset();
+  $("#dialog-error").textContent = "";
+  $("#dialog-title").textContent = welcome ? "Make your feed" : "New reader";
+  $("#dialog-submit").textContent = welcome ? "Show my feed" : "Create reader";
+  $("#reader-dialog").showModal();
 }
 
 function setupDialog() {
@@ -309,23 +355,21 @@ function setupDialog() {
   $("#dialog-languages").append(...state.meta.languages.map((l, i) => chip("language", l, l[0].toUpperCase() + l.slice(1), i === 0)));
   $("#dialog-categories").append(...state.meta.categories.slice(0, 30).map((c) => chip("category", c.key, c.name)));
 
-  $("#new-reader").addEventListener("click", () => {
-    form.reset();
-    $("#dialog-error").textContent = "";
-    dialog.showModal();
-  });
+  $("#new-reader").addEventListener("click", () => openReaderDialog(false));
   $("#dialog-cancel").addEventListener("click", () => dialog.close());
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
+    const welcome = $("#dialog-title").textContent === "Make your feed";
     const picked = (group) => [...form.querySelectorAll(`[data-group="${group}"][aria-pressed="true"]`)].map((b) => b.dataset.value);
     const languages = picked("language");
     if (!languages.length) { $("#dialog-error").textContent = "Pick at least one language."; return; }
     try {
-      const reader = await api("/api/readers", { method: "POST", body: { name: form.name.value.trim() || "Reader", languages, categories: picked("category") } });
+      const reader = await api("/api/readers", { method: "POST", body: { name: form.name.value.trim() || "You", languages, categories: picked("category") } });
       dialog.close();
+      rememberReader(reader.id);
       await refreshReaders();
       selectReader(reader.id);
-      toast(`Created ${reader.name}`);
+      toast(welcome ? "Your feed is ready." : `Created ${reader.name}`);
     } catch (error) {
       $("#dialog-error").textContent = error.message;
     }
@@ -388,12 +432,35 @@ async function loadFeed({ animate = true } = {}) {
   list.setAttribute("aria-busy", "false");
 }
 
+function minutesAgo(iso) {
+  const minutes = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+  const hours = Math.round(minutes / 60);
+  return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+}
+
+function editionLine() {
+  const live = state.meta.live;
+  if (live && live.last_refresh) return `Live edition, feeds checked ${minutesAgo(new Date(live.last_refresh * 1000).toISOString())}`;
+  return `Edition of ${editionDate(state.meta.as_of)}`;
+}
+
 function renderEdition(reader) {
-  const edition = $("#edition");
-  edition.replaceChildren(
-    `Edition of ${editionDate(state.meta.as_of)}, ranked for `,
-    el("strong", { text: reader.name }),
-  );
+  $("#edition").replaceChildren(`${editionLine()}, ranked for `, el("strong", { text: reader.name }));
+}
+
+/* Live mode: the server rebuilds its index when feeds bring new stories.
+   Offer them instead of reshuffling the page under the reader. */
+async function pollEdition() {
+  if (document.visibilityState === "hidden") return;
+  try {
+    const meta = await api("/api/meta");
+    const fresh = meta.edition !== state.meta.edition;
+    state.meta = meta;
+    if (state.feed) renderEdition(state.feed.reader);
+    if (fresh && state.readerId) toast("New stories are in.", "Show them", () => loadFeed({ animate: true }), 15000);
+  } catch { /* try again next time */ }
 }
 
 function storyNode(item, position) {
@@ -421,6 +488,13 @@ function storyNode(item, position) {
 
   $(".reasons", node).append(...item.reasons.map((r) => el("li", { text: r })));
 
+  if (position > 0 && item.image) {
+    // Publisher thumbnails, toned to the palette; a broken image just disappears.
+    const thumb = el("img", { class: "thumb", src: item.image, alt: "", loading: "lazy", referrerpolicy: "no-referrer",
+      onerror: (e) => { e.target.remove(); node.classList.remove("has-thumb"); } });
+    node.classList.add("has-thumb");
+    $(".story-body", node).prepend(thumb);
+  }
   if (position === 0 && item.image) {
     const figure = el("figure", { class: "lead-figure" },
       el("img", { src: item.image, alt: "", loading: "lazy", referrerpolicy: "no-referrer", onerror: (e) => e.target.closest("figure").remove() }));
@@ -652,7 +726,7 @@ function flushViews() {
 }
 
 let toastTimer = null;
-function toast(message, actionLabel, action) {
+function toast(message, actionLabel, action, duration) {
   const box = $("#toast");
   box.replaceChildren(el("span", { text: message }));
   if (actionLabel) {
@@ -660,7 +734,7 @@ function toast(message, actionLabel, action) {
   }
   box.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { box.hidden = true; }, actionLabel ? 6000 : 2800);
+  toastTimer = setTimeout(() => { box.hidden = true; }, duration || (actionLabel ? 6000 : 2800));
 }
 
 /* ------------------------------------------------------------------ */
@@ -701,7 +775,8 @@ async function boot() {
   drawFan();
   setupSheets();
   try {
-    [state.meta] = await Promise.all([api("/api/meta"), refreshReaders()]);
+    state.meta = await api("/api/meta");
+    await refreshReaders();
   } catch (error) {
     $("#edition").textContent = "The server did not answer.";
     $("#feed-list").replaceChildren(el("li", { class: "error-box" }, `Could not reach the Fanlight API (${error.message}). Start it with: fanlight serve`));
@@ -718,13 +793,15 @@ async function boot() {
   setupDialog();
   $("#reader-select").addEventListener("change", (e) => selectReader(e.target.value));
   renderReaderSelect();
+  setInterval(flushViews, 4000);
+  document.addEventListener("visibilitychange", flushViews);
+  if (state.meta.live) setInterval(pollEdition, META_POLL_MS);
   if (!state.readerId) {
-    $("#feed-list").replaceChildren(el("li", { class: "empty" }, el("h3", { text: "No readers yet" }), el("p", { text: "Create a reader to see a ranked feed." })));
+    showWelcome();
+    openReaderDialog(true);
     return;
   }
   await loadFeed({ animate: false });
-  setInterval(flushViews, 4000);
-  document.addEventListener("visibilitychange", flushViews);
 }
 
 boot();

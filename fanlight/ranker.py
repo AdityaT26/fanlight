@@ -132,6 +132,7 @@ class Ranker:
     def __init__(self, index: CorpusIndex, config: RankingConfig | None = None):
         self.index = index
         self.config = config or RankingConfig()
+        self._prominent_cut = float(np.percentile(index.source_quality, 75)) if index.size else 1.0
 
     # ------------------------------------------------------------------ #
     # Steps 1 + 2: signals and fusion
@@ -460,7 +461,9 @@ class Ranker:
         source_j = int(index.source_id[i])
         if source_j >= 0 and state.source_affinity[source_j] >= FAVOURITE_OUTLET:
             notes["source"] = "From an outlet you read"
-        elif value["source"] >= 0.75:
+        elif value["source"] >= 0.75 and index.source_quality[i] > self._prominent_cut:
+            # Only worth saying when it sets the story apart: in a feed of major
+            # outlets every story would qualify.
             notes["source"] = "From a widely read outlet"
 
         ranked = sorted(

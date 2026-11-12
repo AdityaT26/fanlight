@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss xmlns:media="http://search.yahoo.com/mrss/" xmlns:content="http://purl.org/rss/1.0/modules/content/" version="2.0">
+  <channel>
+    <title><![CDATA[Meridian Wire - World]]></title>
+    <link>https://wire.example/world</link>
+    <description>Invented test feed</description>
+    <item>
+      <title><![CDATA[Harbour talks resume as ministers meet in Valetto]]></title>
+      <description><![CDATA[<p>Negotiators from both coastal states <b>agreed</b> to resume talks on the shared harbour after a two-week pause.</p>]]></description>
+      <link>https://wire.example/news/articles/harbour-talks?at_medium=RSS&amp;at_campaign=rss&amp;id=7</link>
+      <guid isPermaLink="false">https://wire.example/news/articles/harbour-talks#0</guid>
+      <pubDate>@@rfc:-2h@@</pubDate>
+      <media:thumbnail width="240" height="135" url="https://img.example/small/harbour.jpg"/>
+      <media:thumbnail width="976" height="549" url="https://img.example/large/harbour.jpg"/>
+    </item>
+    <item>
+      <title><![CDATA[Harbour talks resume as ministers meet in Valetto]]></title>
+      <description><![CDATA[Same story, listed twice with another tracking code.]]></description>
+      <link>https://wire.example/news/articles/harbour-talks?utm_source=feed&amp;id=7</link>
+      <pubDate>@@rfc:-2h@@</pubDate>
+    </item>
+    <item>
+      <title><![CDATA[Glacier survey finds faster melt on the northern ridge]]></title>
+      <description><![CDATA[A survey team measured ice loss at twelve sites over the summer season.]]></description>
+      <link>https://wire.example/news/science-environment/glacier-survey</link>
+      <pubDate>@@rfc:-5h@@</pubDate>
+      <content:encoded><![CDATA[<p>The survey team, led by field glaciologists, spent eleven weeks on the ridge measuring melt rates.</p>]]></content:encoded>
+    </item>
+    <item>
+      <title><![CDATA[Port city opens night ferry to the islands]]></title>
+      <description><![CDATA[The service runs four times a week from the old pier.]]></description>
+      <link>https://wire.example/news/articles/night-ferry</link>
+      <pubDate>@@rfc:+30h@@</pubDate>
+    </item>
+    <item>
+      <title><![CDATA[An item without a link is skipped]]></title>
+      <description>No link here.</description>
+      <pubDate>@@rfc:-1h@@</pubDate>
+    </item>
+    <item>
+      <title><![CDATA[A story from last month is too old to keep]]></title>
+      <description>Old news.</description>
+      <link>https://wire.example/news/articles/old-story</link>
+      <pubDate>@@rfc:-40d@@</pubDate>
+    </item>
+    <item>
+      <title><![CDATA[Underdogs win the coastal league final on penalties]]></title>
+      <description><![CDATA[The final went to a shoot-out after a goalless two hours.]]></description>
+      <link>https://wire.example/sport/football/coastal-final</link>
+      <pubDate>@@rfc:-7h@@</pubDate>
+    </item>
+  </channel>
+</rss>

@@ -7,14 +7,16 @@ time), which is exactly what a learned ranker needs once there is enough of it.
 from __future__ import annotations
 
 import json
+import secrets
 import sqlite3
 import threading
 import time
-import uuid
 from collections.abc import Iterable
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
+from .ingest import parse_datetime
 from .profiles import ACTIONS, Event, Profile
 
 _SCHEMA = """
@@ -33,6 +35,24 @@ CREATE TABLE IF NOT EXISTS events (
     ts          REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS events_by_reader ON events (reader_id, id);
+CREATE TABLE IF NOT EXISTS live_articles (
+    id          TEXT PRIMARY KEY,
+    feed        TEXT NOT NULL,
+    published   REAL NOT NULL,
+    fetched     REAL NOT NULL,
+    data        TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS live_by_published ON live_articles (published);
+CREATE TABLE IF NOT EXISTS feed_state (
+    feed          TEXT PRIMARY KEY,
+    etag          TEXT,
+    modified      TEXT,
+    last_attempt  REAL,
+    last_success  REAL,
+    last_error    TEXT,
+    items         INTEGER NOT NULL DEFAULT 0,
+    new_items     INTEGER NOT NULL DEFAULT 0
+);
 """
 
 #: Keep at most this many impressions per reader; older ones are pruned.
@@ -71,7 +91,8 @@ class Store:
     # ------------------------------------------------------------------ #
 
     def create_reader(self, name: str, languages: Iterable[str], categories: dict[str, float]) -> Profile:
-        reader_id = "r_" + uuid.uuid4().hex[:10]
+        # The id doubles as the reader's key in public mode, so it must be unguessable.
+        reader_id = "r_" + secrets.token_urlsafe(16)
         langs = tuple(dict.fromkeys(str(x).strip().lower() for x in languages if str(x).strip()))
         with self._tx() as conn:
             conn.execute(
@@ -177,7 +198,83 @@ class Store:
             cursor = conn.execute("DELETE FROM events WHERE reader_id=?", (reader_id,))
         return cursor.rowcount
 
+    # ------------------------------------------------------------------ #
+    # Live articles
+    # ------------------------------------------------------------------ #
+
+    def add_live_articles(self, rows: Iterable[dict[str, Any]], fetched: float | None = None) -> int:
+        """Store feed rows; returns how many were new. Existing stories keep their first copy."""
+        now = time.time() if fetched is None else fetched
+        values = []
+        for row in rows:
+            published = _timestamp(row.get("date"), now)
+            values.append(
+                (row["_id"], row.get("feed", ""), published, now, json.dumps(row, ensure_ascii=False))
+            )
+        if not values:
+            return 0
+        with self._tx() as conn:
+            before = conn.total_changes
+            conn.executemany(
+                "INSERT OR IGNORE INTO live_articles (id, feed, published, fetched, data) VALUES (?,?,?,?,?)",
+                values,
+            )
+            return conn.total_changes - before
+
+    def live_articles(self, since: float = 0.0) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT data FROM live_articles WHERE published >= ? ORDER BY published", (since,)
+            ).fetchall()
+        return [json.loads(row["data"]) for row in rows]
+
+    def live_count(self) -> int:
+        with self._lock:
+            return int(self._conn.execute("SELECT COUNT(*) FROM live_articles").fetchone()[0])
+
+    def prune_live(self, before: float) -> int:
+        with self._tx() as conn:
+            cursor = conn.execute("DELETE FROM live_articles WHERE published < ?", (before,))
+        return cursor.rowcount
+
+    def feed_states(self) -> dict[str, dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute("SELECT * FROM feed_state").fetchall()
+        return {row["feed"]: dict(row) for row in rows}
+
+    def record_fetch(
+        self,
+        feed: str,
+        ok: bool,
+        attempted: float,
+        etag: str | None = None,
+        modified: str | None = None,
+        error: str | None = None,
+        items: int = 0,
+        new_items: int = 0,
+        not_modified: bool = False,
+    ) -> None:
+        with self._tx() as conn:
+            conn.execute("INSERT OR IGNORE INTO feed_state (feed) VALUES (?)", (feed,))
+            if ok:
+                conn.execute(
+                    """UPDATE feed_state SET last_attempt=?, last_success=?, last_error=NULL,
+                       etag=COALESCE(?, etag), modified=COALESCE(?, modified),
+                       items=CASE WHEN ? THEN items ELSE ? END, new_items=? WHERE feed=?""",
+                    (attempted, attempted, etag, modified, not_modified, items, new_items, feed),
+                )
+            else:
+                conn.execute(
+                    "UPDATE feed_state SET last_attempt=?, last_error=?, new_items=0 WHERE feed=?",
+                    (attempted, error, feed),
+                )
+
     def event_counts(self) -> dict[str, int]:
         with self._lock:
             rows = self._conn.execute("SELECT action, COUNT(*) AS n FROM events GROUP BY action").fetchall()
         return {row["action"]: row["n"] for row in rows}
+
+
+def _timestamp(value: Any, default: float) -> float:
+    parsed = parse_datetime(value)
+    return parsed.timestamp() if parsed else default

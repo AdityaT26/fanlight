@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:media="http://search.yahoo.com/mrss/">
+  <title>Circuit Notes</title>
+  <link href="https://circuit.example/"/>
+  <updated>@@iso:-1h@@</updated>
+  <id>urn:example:circuit</id>
+  <entry>
+    <title type="html">Battery start-up shows a cell that charges in nine minutes</title>
+    <link rel="alternate" href="https://circuit.example/2026/11/fast-charging-cell"/>
+    <id>urn:example:circuit:1</id>
+    <updated>@@iso:-3h@@</updated>
+    <author><name>R. Iyer</name></author>
+    <category term="Gadgets"/>
+    <summary type="html">&lt;p&gt;A lab prototype reached &lt;em&gt;80 percent&lt;/em&gt; charge in nine minutes.&lt;/p&gt;</summary>
+    <media:content url="https://img.example/cell.png" medium="image" width="1200"/>
+  </entry>
+  <entry>
+    <title>Open source maintainers vote on a new release cadence</title>
+    <link rel="alternate" href="https://circuit.example/2026/11/release-cadence"/>
+    <id>urn:example:circuit:2</id>
+    <published>@@iso:-6h@@</published>
+    <updated>@@iso:-4h@@</updated>
+    <summary>Maintainers will move to two releases a year.</summary>
+  </entry>
+</feed>

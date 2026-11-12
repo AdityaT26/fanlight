@@ -6,9 +6,11 @@ two front ends cannot drift apart.
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import logging
 import pickle
+import threading
 import time
 from collections import Counter
 from collections.abc import Iterable, Mapping
@@ -23,8 +25,10 @@ import sklearn
 from . import __version__
 from .cohorts import NEW_READER, fit_cohorts
 from .config import SIGNALS, RankingConfig, Settings
+from .feeds import load_feeds
 from .index import INDEX_VERSION, CorpusIndex, build_index, resolve_as_of
 from .ingest import COLLECTIONS, RawData, build_corpus, load_json_dir, load_mongo
+from .live import LiveNews
 from .profiles import Profile, ProfileState, build_state, dataset_profiles, public_id, top_interests
 from .ranker import RankedFeed, RankedItem, Ranker
 from .store import Store
@@ -45,6 +49,18 @@ class UnknownReader(KeyError):
     """Raised when a reader id matches neither an imported nor a created reader."""
 
 
+def _locked(method):
+    """Run an engine method under the engine lock, so a live rebuild never swaps
+    the index out from under a request that is halfway through using it."""
+
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+
+    return wrapper
+
+
 class Engine:
     def __init__(
         self,
@@ -54,18 +70,48 @@ class Engine:
         settings: Settings | None = None,
         config: RankingConfig | None = None,
         origin: str = "memory",
+        live: LiveNews | None = None,
     ):
-        self.index = index
         self.settings = settings or Settings()
         self.config = config or RankingConfig()
         self.store = store or Store(":memory:")
         self.origin = origin
-        self.ranker = Ranker(index, self.config)
+        self.live = live
+        self.edition = 0
+        self._lock = threading.RLock()
         self._dataset = {p.id: p for p in profiles}
-        self.cohorts, self._cohort_of = fit_cohorts(
-            index, list(self._dataset.values()), k=self.settings.cohorts
-        )
+        self._install(index)
+
+    def _install(self, index: CorpusIndex) -> None:
+        """Make ``index`` the one every request uses (callers hold the lock or are __init__)."""
+        self.index = index
+        self.ranker = Ranker(index, self.config)
         self._category_counts = Counter(key for a in index.corpus.articles for key in a.categories)
+        cohort_profiles = list(self._dataset.values()) + [
+            p for p in self.store.list_readers() if p.categories
+        ]
+        self.cohorts, self._cohort_of = fit_cohorts(index, cohort_profiles, k=self.settings.cohorts)
+        self.edition += 1
+        self.edition_built = time.time()
+
+    def rebuild(self, raw: RawData, as_of: str = "now") -> None:
+        """Build a new index from ``raw`` and swap it in. Requests keep being served
+        from the old index while the new one builds; the swap itself is instant."""
+        started = time.perf_counter()
+        index = build_index(build_corpus(raw), as_of=as_of)
+        with self._lock:
+            self._install(index)
+        log.info(
+            "Rebuilt index: %d stories in %.1fs (edition %d)",
+            index.size,
+            time.perf_counter() - started,
+            self.edition,
+        )
+
+    def _tick_clock(self) -> None:
+        """Live news is ranked against the wall clock, not the newest story."""
+        if self.live is not None:
+            self.index.as_of = time.time()
 
     # ------------------------------------------------------------------ #
     # Construction
@@ -94,6 +140,25 @@ class Engine:
 
             raw = make_raw(n_articles=900, n_users=60)
             return cls.from_raw(raw, as_of=settings.as_of, store=store, settings=settings, origin="demo")
+        if source == "live":
+            live = LiveNews(store, load_feeds(settings.feeds_path), retention_days=settings.retention_days)
+            if store.live_count() == 0:
+                log.info("No stored stories yet: fetching %d feeds", len(live.feeds))
+                live.refresh()
+            raw = live.raw()
+            if not raw["articles"]:
+                failed = live.last_report.failed if live.last_report else {}
+                detail = (
+                    f" Errors: {'; '.join(f'{k}: {v}' for k, v in list(failed.items())[:3])}"
+                    if failed
+                    else ""
+                )
+                raise RuntimeError(
+                    f"No live stories: none of the {len(live.feeds)} feeds returned anything recent. "
+                    f"Check the internet connection and the feed list (FANLIGHT_FEEDS).{detail}"
+                )
+            index = build_index(build_corpus(raw), as_of="now")
+            return cls(index, (), store=store, settings=settings, origin="live", live=live)
         if source == "mongo":
             if not settings.mongo_uri:
                 raise RuntimeError("Set FANLIGHT_MONGO_URI to read from MongoDB")
@@ -141,11 +206,13 @@ class Engine:
             raise UnknownReader(reader_id)
         return replace(base, events=self.store.events(base.id))
 
+    @_locked
     def create_reader(self, name: str, languages: Iterable[str], categories: Iterable[str]) -> Profile:
         return self.store.create_reader(
             name, self._languages(languages), dict.fromkeys(self._categories(categories), 1.0)
         )
 
+    @_locked
     def update_reader(
         self,
         reader_id: str,
@@ -165,6 +232,7 @@ class Engine:
             raise UnknownReader(reader_id)
         return self.profile(reader_id)
 
+    @_locked
     def delete_reader(self, reader_id: str) -> None:
         if reader_id in self._dataset:
             raise PermissionError("Imported readers cannot be deleted")
@@ -180,25 +248,41 @@ class Engine:
 
     def _categories(self, categories: Iterable[str]) -> list[str]:
         clean = list(dict.fromkeys(str(x) for x in categories))
-        unknown = [x for x in clean if x not in self._category_counts]
+        unknown = [x for x in clean if x not in self.index.corpus.categories]
         if unknown:
             raise ValueError(f"unknown category key(s): {', '.join(unknown)}")
         return clean
 
+    @_locked
     def record(self, reader_id: str, events: Iterable[tuple[str, str]]) -> int:
         """Log interactions. Events for stories not in the index are dropped."""
         profile = self.profile(reader_id)
         known = [(a, action) for a, action in events if a in self.index.position]
         return self.store.add_events(profile.id, known)
 
+    @_locked
     def undo(self, reader_id: str, article_id: str, action: str) -> int:
         return self.store.remove_events(self.profile(reader_id).id, article_id, action)
 
+    @_locked
     def reset_history(self, reader_id: str) -> int:
         return self.store.clear_events(self.profile(reader_id).id)
 
-    def list_readers(self, limit: int = 60) -> list[dict[str, Any]]:
-        """Created readers first, then imported ones (those with interests first)."""
+    @_locked
+    def list_readers(self, limit: int = 60, ids: Iterable[str] | None = None) -> list[dict[str, Any]]:
+        """Created readers first, then imported ones (those with interests first).
+
+        With ``ids``, only those readers (unknown ids are skipped): this is how a
+        browser in public mode lists the readers it created and nobody else's.
+        """
+        if ids is not None:
+            cards = []
+            for reader_id in dict.fromkeys(ids):
+                try:
+                    cards.append(self._reader_card(self.profile(reader_id)))
+                except UnknownReader:
+                    continue
+            return cards
         created = [self._reader_card(p) for p in self.store.list_readers()]
         imported = sorted(self._dataset.values(), key=lambda p: (not p.categories, p.id))
         return created + [self._reader_card(p) for p in imported[: max(limit - len(created), 0)]]
@@ -224,6 +308,7 @@ class Engine:
                 vector[positions[key]] = weight
         return self.cohorts.assign(vector)
 
+    @_locked
     def describe_reader(
         self, reader_id: str, state: ProfileState | None = None, profile: Profile | None = None
     ) -> dict[str, Any]:
@@ -260,6 +345,7 @@ class Engine:
     # Ranking
     # ------------------------------------------------------------------ #
 
+    @_locked
     def rank(
         self,
         reader_id: str,
@@ -268,12 +354,14 @@ class Engine:
         categories: Iterable[str] | None = None,
         now: float | None = None,
     ) -> tuple[Profile, ProfileState, RankedFeed]:
+        self._tick_clock()
         profile = self.profile(reader_id)
         config = self.config.with_overrides(overrides)
         state = build_state(self.index, profile, config, now=now)
         wanted = self._categories(categories) if categories else None
         return profile, state, self.ranker.rank(profile, k=k, config=config, categories=wanted, state=state)
 
+    @_locked
     def feed(
         self,
         reader_id: str,
@@ -329,6 +417,7 @@ class Engine:
         source = self.index.corpus.sources.get(key)
         return source.name if source else key
 
+    @_locked
     def article_json(self, i: int) -> dict[str, Any]:
         article = self.index.article(i)
         corpus = self.index.corpus
@@ -353,7 +442,9 @@ class Engine:
     # Metadata
     # ------------------------------------------------------------------ #
 
+    @_locked
     def meta(self) -> dict[str, Any]:
+        self._tick_clock()
         corpus = self.index.corpus
         stats = self.index.stats()
         return {
@@ -377,6 +468,12 @@ class Engine:
             ],
             "readers": {"imported": len(self._dataset), "created": len(self.store.list_readers())},
             "events": self.store.event_counts(),
+            "public": self.settings.public,
+            "edition": self.edition,
+            "edition_built": datetime.fromtimestamp(self.edition_built, tz=timezone.utc)
+            .isoformat()
+            .replace("+00:00", "Z"),
+            "live": self.live.status() if self.live is not None else None,
         }
 
 

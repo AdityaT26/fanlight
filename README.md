@@ -4,11 +4,12 @@
 
 <p align="center">
   <b>A personalised news feed that shows its working.</b><br>
-  Every story says why it is there. The feed learns from what you read, keeps some room for what you don't, and lets you turn the dials yourself.
+  Today's news from 20 feeds in English and Hindi, ranked for each reader. Every story says why it is there, the feed learns from what you read and keeps some room for what you don't.
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/tests-67%20passing-D9B46A" alt="67 tests passing">
+  <img src="https://img.shields.io/badge/tests-95%20passing-D9B46A" alt="95 tests passing">
+  <img src="https://img.shields.io/badge/licence-MIT-D9B46A" alt="MIT licence">
   <img src="https://img.shields.io/badge/python-3.10%2B-6B4B94" alt="Python 3.10+">
   <img src="https://img.shields.io/badge/API-FastAPI-6B4B94" alt="FastAPI">
   <img src="https://img.shields.io/badge/languages-English%20%2B%20Hindi-D9B46A" alt="English and Hindi">
@@ -19,6 +20,24 @@
 </p>
 
 A fanlight is the half-round window over an art-deco door, with bars fanning out like sunrays. It lets light into the room. That is the idea here: a recommender you can see into, rather than a black box that decides what you read.
+
+## Read today's news
+
+```bash
+pip install git+https://github.com/AdityaT26/fanlight.git
+fanlight serve --source live
+```
+
+Open <http://127.0.0.1:8000>, pick a language and a few topics, and the feed is ready. Fanlight polls 20 publisher feeds every 15 minutes, keeps two weeks of stories, rebuilds its index in the background and offers new stories with a "New stories are in" prompt instead of reshuffling the page while you read.
+
+| Language | Outlets in the default list |
+| --- | --- |
+| English | The Hindu (national, business, science and tech, sport), The Indian Express, Hindustan Times, BBC News (world, technology, science, business), The Guardian (world, film, sport), Al Jazeera, Ars Technica, ESPNcricinfo |
+| Hindi | BBC Hindi, Aaj Tak, ABP Live, Amar Ujala |
+
+Each feed has a default category; a story's own tags and the section in its URL refine it, so a cricket report in a general Hindi feed usually lands in Cricket rather than Top News. Fanlight shows only what a feed reader shows (headline, the feed's own summary, its image) and every headline links to the publisher. The list lives in [`fanlight/feeds.toml`](fanlight/feeds.toml): copy it, add or remove feeds and point `FANLIGHT_FEEDS` at your copy. `fanlight feeds` shows which ones are healthy.
+
+**Running it for other people.** `--public` (on by default in the Docker image) makes each browser private: nobody can list readers, a reader's long random id is its key, and the browser remembers the readers it created. There are no accounts or passwords, so treat it as a personal reading tool you can share, not a service holding anything sensitive. Check each publisher's feed terms before you put a public service on top of their feeds.
 
 ## What it does
 
@@ -92,14 +111,16 @@ pip install -e ".[dev]"
 fanlight serve --demo        # a synthetic newsroom, no data needed
 ```
 
-Open <http://127.0.0.1:8000>. To use real data, put the JSON export in `data/` (or point `FANLIGHT_DATA_DIR` at it) and run `fanlight serve`. The first start builds the index, about 20 seconds for 10,000 articles, and caches it in `var/`; after that it starts in under a second.
+Open <http://127.0.0.1:8000>. Run `fanlight serve --source live` for today's news, or put the JSON export in `data/` (or point `FANLIGHT_DATA_DIR` at it) and run `fanlight serve` to rank the dataset. The first start builds the index, about 20 seconds for 10,000 articles, and caches it in `var/`; after that it starts in under a second.
 
-With Docker:
+With Docker, live news in public mode out of the box:
 
 ```bash
 docker build -t fanlight .
-docker run -p 8000:8000 -v "$PWD/data:/app/data" fanlight
+docker run -p 8000:8000 -v fanlight-state:/app/var fanlight
 ```
+
+The volume keeps readers, their history and fetched stories across restarts. Add `--source json` and mount the dataset at `/app/data` to serve the dataset instead.
 
 ## How a story earns its place
 
@@ -110,7 +131,7 @@ docker run -p 8000:8000 -v "$PWD/data:/app/data" fanlight
                                      reader state ◀── opens, likes, saves, hides, impressions
 ```
 
-1. **Ingest.** The MongoDB export arrives with ids in several shapes, five date formats, three overlapping tag collections, duplicate categories, soft-deleted rows and re-ingested duplicates. All of it is normalised into typed articles.
+1. **Ingest.** Live mode fetches RSS and Atom feeds with conditional requests, so an unchanged feed costs one 304. The MongoDB export arrives with ids in several shapes, five date formats, three overlapping tag collections, duplicate categories, soft-deleted rows and re-ingested duplicates. All of it is normalised into typed articles.
 2. **Index.** Bilingual TF-IDF over headline and body. Reports of one event from different outlets are grouped into a story: cosine of at least 0.5, same language, within 72 hours, with a stricter 0.85 for two pieces from the same outlet, whose page templates make unrelated articles look alike.
 3. **Reader state.** Stated interests and behaviour become an affinity per category between -1 and 1. Evidence is log-damped and fades with a 21-day half-life. Opened stories also form a text taste vector that is trusted more as evidence builds.
 4. **Six signals.** Category, topic tags, similar text, freshness (a fast and a slow decay), outlet (reach plus the reader's favourites) and coverage (outlets per story plus engagement). A signal with nothing to say for this reader sits out and its weight goes to the others.
@@ -148,8 +169,12 @@ Environment variables, or a `.env` file in the working directory (see [`.env.exa
 | `FANLIGHT_MONGO_URI` | unset | MongoDB connection string for `--source mongo` |
 | `FANLIGHT_MONGO_DB` | `unbiasly` | Database name |
 | `FANLIGHT_COHORTS` | `8` | Number of reader cohorts |
+| `FANLIGHT_FEEDS` | packaged list | Feed list for live mode (TOML) |
+| `FANLIGHT_REFRESH_MINUTES` | `15` | Minutes between feed refreshes |
+| `FANLIGHT_RETENTION_DAYS` | `14` | Days of live stories to keep |
+| `FANLIGHT_PUBLIC` | `false` | Browsers only see the readers they created |
 
-`FANLIGHT_AS_OF=latest` ranks a static export as if it were the moment of its newest story, so freshness still means something months later.
+In live mode stories are always ranked against the current time. `FANLIGHT_AS_OF=latest` ranks a static export as if it were the moment of its newest story, so freshness still means something months later.
 
 </details>
 
@@ -157,6 +182,9 @@ Environment variables, or a `.env` file in the working directory (see [`.env.exa
 <summary><b>Command line</b></summary>
 
 ```bash
+fanlight serve --source live      # today's news; add --public to share it
+fanlight fetch                    # fetch the feeds once (handy from cron)
+fanlight feeds                    # which feeds are healthy, which are failing
 fanlight index                    # build the index, print corpus statistics and cohorts
 fanlight readers                  # list readers
 fanlight create-reader Aditi --category politics --category technology
@@ -167,7 +195,7 @@ fanlight demo-data ./demo         # write the synthetic dataset as JSON
 fanlight serve --host 0.0.0.0 --port 8000
 ```
 
-Every data command also takes `--demo`, `--source mongo` and `--rebuild`.
+Every data command also takes `--source json|live|mongo`, `--demo` and `--rebuild`.
 
 </details>
 
@@ -179,7 +207,7 @@ Interactive docs live at `/api/docs` while the server runs.
 | Method | Path | |
 | --- | --- | --- |
 | GET | `/api/meta` | Corpus statistics, categories, signals, defaults, cohorts |
-| GET | `/api/readers` | Readers |
+| GET | `/api/readers` | Readers. `?ids=a,b` returns just those; in public mode that is the only way to list any |
 | POST | `/api/readers` | Create: `{"name", "languages": [...], "categories": [...]}` |
 | GET, PATCH, DELETE | `/api/readers/{id}` | One reader; imported readers are read-only |
 | GET | `/api/readers/{id}/feed` | Ranked feed. Query: `k`, `category` (repeatable), `diversity`, `discovery`, `half_life_hours`, `hide_read`, `w_<signal>` |
@@ -187,6 +215,7 @@ Interactive docs live at `/api/docs` while the server runs.
 | DELETE | `/api/readers/{id}/events` | Undo one action |
 | DELETE | `/api/readers/{id}/history` | Forget a reader's interactions |
 | GET | `/api/articles/{id}` | One article |
+| GET | `/api/feeds` | Live mode: each feed's last fetch, errors and story counts |
 
 </details>
 
@@ -194,6 +223,9 @@ Interactive docs live at `/api/docs` while the server runs.
 
 ```
 fanlight/
+  feeds.py        fetch and parse RSS and Atom, infer categories
+  feeds.toml      the default feed list
+  live.py         rolling window of live stories, background refresher
   ingest.py       load JSON or MongoDB, normalise into typed articles
   text.py         bilingual tokenizer and TF-IDF
   index.py        vectors, story clusters, outlet reach, coverage
@@ -206,7 +238,7 @@ fanlight/
   synth.py        synthetic newsroom for tests and --demo
   api.py, cli.py  FastAPI app and command line
   web/static/     the web app: plain HTML, CSS and JavaScript, fonts self-hosted
-tests/            67 tests, including browser tests at desktop and phone sizes
+tests/            95 tests: live feeds against a local feed server, browser tests at desktop and phone sizes
 scripts/          comparison against the v1 model
 ```
 
@@ -233,4 +265,4 @@ Fanlight is a ground-up rewrite of my earlier news-ranking-system, which was bui
 
 ## Licence
 
-No licence has been chosen yet, so the code is all rights reserved for now. The fonts in `fanlight/web/static/fonts` are under the SIL Open Font License.
+[MIT](LICENSE). The fonts in `fanlight/web/static/fonts` are under the SIL Open Font License. News content belongs to its publishers.

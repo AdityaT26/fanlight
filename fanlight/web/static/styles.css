@@ -282,6 +282,22 @@ input[type="range"]::-moz-range-thumb { width: 11px; height: 11px; background: v
 .act[data-action="hide"]:hover { color: var(--danger); border-color: var(--danger); }
 .act.why[aria-expanded="true"] { color: var(--brass); border-color: var(--brass); }
 
+/* Thumbnails for the rest of the feed (live stories usually carry one) */
+.thumb {
+  float: right;
+  width: 148px;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  margin: .2rem 0 .6rem 1.1rem;
+  filter: grayscale(.35) sepia(.25) hue-rotate(225deg) saturate(1.1) brightness(.92);
+  clip-path: polygon(8px 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%, 0 8px);
+  background: var(--velvet);
+}
+.story.has-thumb .actions, .story.has-thumb .why-panel { clear: both; }
+
+.welcome { padding-top: 1.5rem; }
+.welcome p { max-width: 46ch; margin-bottom: 1.1rem; }
+
 /* Lead story */
 .story.lead { grid-template-columns: 3.4rem minmax(0, 1fr); padding-top: .2rem; }
 .story.lead .rank { font-size: var(--t-3xl); }
@@ -426,6 +442,7 @@ input[type="range"]::-moz-range-thumb { width: 11px; height: 11px; background: v
   .headline { font-size: 1.125rem; }
   .summary { font-size: var(--t-sm); -webkit-line-clamp: 3; }
   .lead-figure { aspect-ratio: 16 / 9; margin-left: -3rem; }
+  .thumb { width: 92px; margin-left: .8rem; }
   .act { padding: .3rem .6rem; }
   .contrib li { grid-template-columns: 5.4rem 1fr 2.6rem; }
   .feed-foot, .empty { padding-left: 3rem; }

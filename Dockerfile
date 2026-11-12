@@ -11,5 +11,8 @@ RUN pip install --no-cache-dir .
 RUN useradd --create-home app && mkdir -p /app/var && chown app /app/var
 USER app
 EXPOSE 8000
-# Mount the dataset at /app/data, or append --demo to run without it.
+VOLUME ["/app/var"]
 ENTRYPOINT ["fanlight", "serve", "--host", "0.0.0.0", "--port", "8000"]
+# Live news for the public by default. Override, for example with
+# `--source json` (and mount the dataset at /app/data) or `--demo`.
+CMD ["--source", "live", "--public"]

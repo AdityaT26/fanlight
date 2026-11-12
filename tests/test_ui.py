@@ -115,3 +115,51 @@ def test_phone_layout_uses_sheets(browser, server):
     # Nothing overflows the viewport sideways.
     assert page.evaluate("document.documentElement.scrollWidth") <= 390
     assert not errors
+
+
+@pytest.fixture(scope="module")
+def live_server(tmp_path_factory):
+    from feedserver import FeedServer
+
+    from fanlight.config import Settings
+    from fanlight.engine import Engine
+
+    folder = tmp_path_factory.mktemp("live-ui")
+    with FeedServer() as feeds:
+        settings = Settings(state_dir=folder, feeds_path=feeds.feeds_toml(folder / "feeds.toml"), public=True)
+        engine = Engine.load(settings, source="live")
+        port = _free_port()
+        instance = uvicorn.Server(
+            uvicorn.Config(create_app(engine), host="127.0.0.1", port=port, log_level="error")
+        )
+        thread = threading.Thread(target=instance.run, daemon=True)
+        thread.start()
+        for _ in range(100):
+            if instance.started:
+                break
+            time.sleep(0.05)
+        yield f"http://127.0.0.1:{port}"
+        instance.should_exit = True
+        thread.join(timeout=5)
+
+
+def test_public_live_onboarding(browser, live_server):
+    page = browser.new_context(viewport={"width": 1280, "height": 900}).new_page()
+    errors: list[str] = []
+    page.on("pageerror", lambda exc: errors.append(str(exc)))
+    page.goto(live_server)
+    page.wait_for_selector("#reader-dialog[open]")
+    assert page.locator("#dialog-title").inner_text() == "Make your feed"
+    assert "Live edition" in page.locator("#edition").inner_text()
+    page.locator('#dialog-categories .chip:has-text("Technology")').click()
+    page.locator("#dialog-submit").click()  # no name needed
+    page.wait_for_selector(".story")
+    assert page.locator(".story").first.locator(".headline").inner_text().startswith("Battery start-up")
+    assert "ranked for You" in page.locator("#edition").inner_text()
+
+    # Another browser starts from scratch and cannot see this reader.
+    other = browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True).new_page()
+    other.goto(live_server)
+    other.wait_for_selector("#reader-dialog[open]")
+    assert other.locator("#reader-select option").count() == 0
+    assert not errors

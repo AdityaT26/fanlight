@@ -76,7 +76,14 @@ def create_app(engine: Engine) -> FastAPI:
         return engine.meta()
 
     @app.get("/api/readers")
-    def readers(limit: Annotated[int, Query(ge=1, le=500)] = 60) -> list[dict[str, Any]]:
+    def readers(
+        limit: Annotated[int, Query(ge=1, le=500)] = 60,
+        ids: Annotated[str | None, Query(max_length=2000, description="Comma-separated reader ids")] = None,
+    ) -> list[dict[str, Any]]:
+        if ids is not None:
+            return engine.list_readers(ids=[x for x in ids.split(",") if x][:20])
+        if engine.settings.public:
+            return []  # in public mode nobody can list other people's readers
         return engine.list_readers(limit)
 
     @app.post("/api/readers", status_code=201)
@@ -137,6 +144,12 @@ def create_app(engine: Engine) -> FastAPI:
     @app.delete("/api/readers/{reader_id}/history")
     def reset(reader_id: str) -> dict[str, int]:
         return {"removed": engine.reset_history(reader_id)}
+
+    @app.get("/api/feeds")
+    def feeds() -> dict[str, Any]:
+        if engine.live is None:
+            raise HTTPException(404, "Live feeds are off. Start the server with --source live.")
+        return engine.live.status()
 
     @app.get("/api/articles/{article_id}")
     def article(article_id: str) -> dict[str, Any]:

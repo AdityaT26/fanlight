@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>समाचार दर्पण</title>
+    <link>https://darpan.example/</link>
+    <description>परीक्षण फ़ीड</description>
+    <item>
+      <title><![CDATA[नई मेट्रो लाइन पर परीक्षण शुरू, अगले महीने से यात्री सेवा]]></title>
+      <description><![CDATA[<img src="https://img.example/metro.jpg" /> शहर की नई मेट्रो लाइन पर आज से परीक्षण शुरू हो गया।]]></description>
+      <link>https://darpan.example/india/news/story/metro-trial-1234</link>
+      <pubDate>@@iso:-1h@@</pubDate>
+    </item>
+    <item>
+      <title><![CDATA[युवा बल्लेबाज़ ने पहले ही मैच में शतक जड़ा]]></title>
+      <description><![CDATA[रणजी ट्रॉफी के पहले मैच में युवा बल्लेबाज़ ने शानदार शतक बनाया।]]></description>
+      <link>https://darpan.example/sports/cricket/story/debut-century-5678</link>
+      <pubDate>@@iso:-4h@@</pubDate>
+      <enclosure url="https://img.example/century.jpg" type="image/jpeg" length="1234"/>
+    </item>
+    <item>
+      <title><![CDATA[नई वेब सीरीज़ का ट्रेलर जारी]]></title>
+      <description><![CDATA[ट्रेलर को पहले ही दिन खूब देखा गया।]]></description>
+      <link>https://darpan.example/entertainment/web-series/trailer-9012</link>
+      <category>मनोरंजन</category>
+      <pubDate>@@iso:-9h@@</pubDate>
+    </item>
+  </channel>
+</rss>

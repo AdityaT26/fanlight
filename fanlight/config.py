@@ -138,6 +138,14 @@ class Settings:
     mongo_uri: str | None = None
     mongo_db: str = "unbiasly"
     cohorts: int = 8
+    #: Feed list for live mode (None = the packaged feeds.toml).
+    feeds_path: Path | None = None
+    #: Minutes between feed refreshes in live mode.
+    refresh_minutes: float = 15.0
+    #: Days of live stories to keep.
+    retention_days: float = 14.0
+    #: Public mode: browsers only see the readers they created.
+    public: bool = False
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None, dotenv: str | Path = ".env") -> Settings:
@@ -151,6 +159,10 @@ class Settings:
             mongo_uri=env.get("FANLIGHT_MONGO_URI") or None,
             mongo_db=env.get("FANLIGHT_MONGO_DB", "unbiasly"),
             cohorts=int(env.get("FANLIGHT_COHORTS", "8")),
+            feeds_path=Path(env["FANLIGHT_FEEDS"]) if env.get("FANLIGHT_FEEDS") else None,
+            refresh_minutes=float(env.get("FANLIGHT_REFRESH_MINUTES", "15")),
+            retention_days=float(env.get("FANLIGHT_RETENTION_DAYS", "14")),
+            public=env.get("FANLIGHT_PUBLIC", "").strip().lower() in ("1", "true", "yes", "on"),
         )
 
     @property

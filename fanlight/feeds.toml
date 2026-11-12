@@ -1,0 +1,177 @@
+# Fanlight's default news feeds.
+#
+# Copy this file, edit it and point FANLIGHT_FEEDS at your copy (or pass --feeds).
+# Feeds were checked to be live on 12 November 2026 (BBC science and business and
+# Guardian sport by the same URL scheme as their checked sister feeds).
+# Feeds move: `fanlight feeds` shows which ones are failing.
+#
+#   id        short unique name, used in logs and `fanlight feeds`
+#   url       RSS 2.0, RSS 1.0 or Atom feed
+#   outlet    the publisher's name as readers should see it
+#   language  english or hindi (any language works; the tokenizer handles Latin and Devanagari)
+#   category  default category; a story's own tags or URL path can refine it
+#   reach     1 = national or international reach, 2 = large, 3 = niche. Feeds the outlet signal.
+#
+# Fanlight shows only the headline, the feed's own summary (trimmed) and image,
+# and links every story back to the publisher. Check each publisher's terms
+# before running a public service on top of their feeds.
+
+[[feed]]
+id = "hindu-national"
+url = "https://www.thehindu.com/news/national/feeder/default.rss"
+outlet = "The Hindu"
+language = "english"
+category = "India"
+reach = 1
+
+[[feed]]
+id = "hindu-business"
+url = "https://www.thehindu.com/business/feeder/default.rss"
+outlet = "The Hindu"
+language = "english"
+category = "Business"
+reach = 1
+
+[[feed]]
+id = "hindu-scitech"
+url = "https://www.thehindu.com/sci-tech/feeder/default.rss"
+outlet = "The Hindu"
+language = "english"
+category = "Science"
+reach = 1
+
+[[feed]]
+id = "hindu-sport"
+url = "https://www.thehindu.com/sport/feeder/default.rss"
+outlet = "The Hindu"
+language = "english"
+category = "Sport"
+reach = 1
+
+[[feed]]
+id = "indianexpress-india"
+url = "https://indianexpress.com/section/india/feed/"
+outlet = "The Indian Express"
+language = "english"
+category = "India"
+reach = 1
+
+[[feed]]
+id = "ht-india"
+url = "https://www.hindustantimes.com/feeds/rss/india-news/rssfeed.xml"
+outlet = "Hindustan Times"
+language = "english"
+category = "India"
+reach = 1
+
+[[feed]]
+id = "bbc-world"
+url = "https://feeds.bbci.co.uk/news/world/rss.xml"
+outlet = "BBC News"
+language = "english"
+category = "World"
+reach = 1
+
+[[feed]]
+id = "bbc-technology"
+url = "https://feeds.bbci.co.uk/news/technology/rss.xml"
+outlet = "BBC News"
+language = "english"
+category = "Technology"
+reach = 1
+
+[[feed]]
+id = "bbc-science"
+url = "https://feeds.bbci.co.uk/news/science_and_environment/rss.xml"
+outlet = "BBC News"
+language = "english"
+category = "Science"
+reach = 1
+
+[[feed]]
+id = "bbc-business"
+url = "https://feeds.bbci.co.uk/news/business/rss.xml"
+outlet = "BBC News"
+language = "english"
+category = "Business"
+reach = 1
+
+[[feed]]
+id = "guardian-world"
+url = "https://www.theguardian.com/world/rss"
+outlet = "The Guardian"
+language = "english"
+category = "World"
+reach = 1
+
+[[feed]]
+id = "guardian-film"
+url = "https://www.theguardian.com/film/rss"
+outlet = "The Guardian"
+language = "english"
+category = "Entertainment"
+reach = 1
+
+[[feed]]
+id = "guardian-sport"
+url = "https://www.theguardian.com/sport/rss"
+outlet = "The Guardian"
+language = "english"
+category = "Sport"
+reach = 1
+
+[[feed]]
+id = "aljazeera"
+url = "https://www.aljazeera.com/xml/rss/all.xml"
+outlet = "Al Jazeera"
+language = "english"
+category = "World"
+reach = 1
+
+[[feed]]
+id = "arstechnica"
+url = "https://feeds.arstechnica.com/arstechnica/index"
+outlet = "Ars Technica"
+language = "english"
+category = "Technology"
+reach = 2
+
+[[feed]]
+id = "espncricinfo"
+url = "https://www.espncricinfo.com/rss/content/story/feeds/0.xml"
+outlet = "ESPNcricinfo"
+language = "english"
+category = "Cricket"
+reach = 2
+
+[[feed]]
+id = "bbc-hindi"
+url = "https://feeds.bbci.co.uk/hindi/rss.xml"
+outlet = "BBC Hindi"
+language = "hindi"
+category = "Top News"
+reach = 1
+
+[[feed]]
+id = "aajtak"
+url = "https://www.aajtak.in/rssfeeds/?id=home"
+outlet = "Aaj Tak"
+language = "hindi"
+category = "Top News"
+reach = 1
+
+[[feed]]
+id = "abplive"
+url = "https://www.abplive.com/home/feed"
+outlet = "ABP Live"
+language = "hindi"
+category = "Top News"
+reach = 1
+
+[[feed]]
+id = "amarujala"
+url = "https://www.amarujala.com/rss/breaking-news.xml"
+outlet = "Amar Ujala"
+language = "hindi"
+category = "Top News"
+reach = 1
