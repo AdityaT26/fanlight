@@ -1,0 +1,6 @@
+The fonts in this folder are licensed under the SIL Open Font License, Version 1.1
+(https://openfontlicense.org). They were taken from the Fontsource npm packages.
+
+limelight-*.woff2  Limelight. Copyright (c) 2010 by Sorkin Type Co, with Reserved Font Name "Limelight".
+jost-*.woff2       Jost. Copyright 2020 The Jost Project Authors (https://github.com/indestructible-type/Jost).
+poppins-*.woff2    Poppins. Copyright 2020 The Poppins Project Authors (https://github.com/itfoundry/Poppins).

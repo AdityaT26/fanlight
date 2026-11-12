@@ -1,0 +1,9 @@
+data/
+var/
+.venv/
+.git/
+tests/
+docs/
+**/__pycache__/
+*.pkl
+.env

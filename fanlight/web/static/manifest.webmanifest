@@ -1,0 +1,12 @@
+{
+  "name": "Fanlight",
+  "short_name": "Fanlight",
+  "description": "Personalised news, with the reasons shown.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1C1029",
+  "theme_color": "#1C1029",
+  "icons": [
+    { "src": "/static/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

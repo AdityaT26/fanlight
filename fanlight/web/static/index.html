@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1C1029">
+  <meta name="description" content="Fanlight ranks the day's news for each reader and shows why every story is where it is.">
+  <title>Fanlight</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+  <link rel="preload" href="/static/fonts/limelight-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/static/fonts/jost-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#feed">Skip to the feed</a>
+
+  <header class="masthead">
+    <svg class="fan" viewBox="0 0 600 170" aria-hidden="true" preserveAspectRatio="xMidYMax meet">
+      <g class="rays"></g>
+    </svg>
+    <h1 class="wordmark">Fanlight</h1>
+    <p class="edition" id="edition">Loading the edition</p>
+  </header>
+
+  <div class="layout">
+    <aside class="panel panel-reader" id="panel-reader" aria-label="Reader and tuning">
+      <section class="block" aria-labelledby="reader-heading">
+        <div class="block-head">
+          <h2 id="reader-heading">Reader</h2>
+          <button class="link-button" type="button" id="new-reader">New reader</button>
+        </div>
+        <label class="sr-only" for="reader-select">Choose a reader</label>
+        <select id="reader-select" class="select"></select>
+        <div id="reader-card" class="reader-card" aria-live="polite"></div>
+      </section>
+
+      <section class="block" aria-labelledby="tune-heading">
+        <div class="block-head">
+          <h2 id="tune-heading">Tuning</h2>
+          <button class="link-button" type="button" id="reset-tuning">Reset</button>
+        </div>
+        <div class="dial">
+          <label for="dial-diversity">Variety <output id="out-diversity"></output></label>
+          <input type="range" id="dial-diversity" min="0" max="1" step="0.05">
+          <p class="hint">How hard the feed avoids repeating a topic or outlet.</p>
+        </div>
+        <div class="dial">
+          <label for="dial-discovery">Discovery <output id="out-discovery"></output></label>
+          <input type="range" id="dial-discovery" min="0" max="0.5" step="0.05">
+          <p class="hint">Share of slots for stories outside your usual reading.</p>
+        </div>
+        <div class="dial">
+          <label for="dial-halflife">Freshness <output id="out-halflife"></output></label>
+          <input type="range" id="dial-halflife" min="0" max="100" step="1">
+          <p class="hint">How fast a story loses its place as it ages.</p>
+        </div>
+        <label class="check">
+          <input type="checkbox" id="dial-hideread">
+          <span>Hide stories I already opened</span>
+        </label>
+        <details class="weights">
+          <summary>Signal weights</summary>
+          <div id="weight-dials"></div>
+        </details>
+      </section>
+    </aside>
+
+    <main class="feed-column" id="feed" tabindex="-1">
+      <nav class="filters" aria-label="Filter by category">
+        <div class="filter-track" id="filters" role="group"></div>
+      </nav>
+      <ol class="feed" id="feed-list" aria-live="polite" aria-busy="true"></ol>
+      <div class="feed-foot" id="feed-foot"></div>
+    </main>
+
+    <aside class="panel panel-shape" id="panel-shape" aria-labelledby="shape-heading">
+      <section class="block">
+        <h2 id="shape-heading">Shape of this feed</h2>
+        <div id="shape"></div>
+      </section>
+      <section class="block">
+        <h2>How a story earns its place</h2>
+        <ol class="method" id="method"></ol>
+      </section>
+    </aside>
+  </div>
+
+  <nav class="dock" aria-label="Panels">
+    <button type="button" data-sheet="panel-reader" aria-expanded="false">Reader and tuning</button>
+    <button type="button" data-sheet="panel-shape" aria-expanded="false">Feed shape</button>
+  </nav>
+  <div class="scrim" id="scrim" hidden></div>
+
+  <dialog id="reader-dialog" class="dialog" aria-labelledby="dialog-title">
+    <form method="dialog" id="reader-form">
+      <h2 id="dialog-title">New reader</h2>
+      <label class="field">
+        <span>Name</span>
+        <input type="text" name="name" maxlength="60" autocomplete="off" required placeholder="Aditi">
+      </label>
+      <fieldset class="field">
+        <legend>Languages</legend>
+        <div class="chips" id="dialog-languages"></div>
+      </fieldset>
+      <fieldset class="field">
+        <legend>Pick a few topics to start with</legend>
+        <div class="chips" id="dialog-categories"></div>
+      </fieldset>
+      <p class="form-error" id="dialog-error" role="alert"></p>
+      <div class="dialog-actions">
+        <button type="button" class="button ghost" value="cancel" id="dialog-cancel">Cancel</button>
+        <button type="submit" class="button" id="dialog-submit">Create reader</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+  <template id="story-template">
+    <li class="story">
+      <span class="rank" aria-hidden="true"></span>
+      <div class="story-body">
+        <p class="kicker"></p>
+        <h3 class="headline"><a target="_blank" rel="noopener noreferrer"></a></h3>
+        <p class="summary"></p>
+        <p class="meta"></p>
+        <ul class="reasons"></ul>
+        <div class="actions">
+          <button type="button" class="act" data-action="like" aria-pressed="false">Like</button>
+          <button type="button" class="act" data-action="save" aria-pressed="false">Save</button>
+          <button type="button" class="act" data-action="hide">Not for me</button>
+          <button type="button" class="act why" aria-expanded="false">Why here</button>
+        </div>
+        <div class="why-panel" hidden></div>
+      </div>
+    </li>
+  </template>
+</body>
+</html>
