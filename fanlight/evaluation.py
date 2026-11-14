@@ -12,6 +12,21 @@ feedback, and what diversity and freshness it trades for that. What it does
 not measure: real click-through. Ground truth is defined on the dataset's
 editorial category labels, never on the text features the ranker uses, so the
 content signal gets no free credit.
+
+Metrics, per reader and round, averaged over readers:
+
+- ``ndcg``: nDCG@k with graded gains. A story's gain is the reader's hidden
+  strength for its best-matching category (1.0, 0.7, 0.5, 0.35 for their
+  first to fourth category), 0 in another language or older than 14 days.
+  DCG = sum(gain / log2(position + 1)); the ideal is the best feed that could
+  be built from stories the reader has not opened, liked, saved or hidden yet.
+- ``unstated_found``: share of the categories the reader never stated that
+  appear at least once in the feed.
+- ``interest_recall``: the same over all of the reader's categories, stated
+  one included.
+- ``opens``: stories opened from that round's feed (the report sums rounds).
+- ``category_entropy``: Shannon entropy (bits) of the feed's primary categories.
+- ``median_age_hours``: median story age at the feed clock.
 """
 
 from __future__ import annotations
@@ -146,6 +161,54 @@ def v1_policy(index: CorpusIndex) -> Policy:
     return policy
 
 
+def v1_model_policy(index: CorpusIndex, model: Any) -> Policy:
+    """v1's actual trained model, scored on the four features v1 built.
+
+    Features per (reader, story): reader language (1 english, 2 other), language
+    match, how many of the reader's stated categories the story is in, and days
+    since the story was updated. v1 measured age against the wall clock, which
+    by now puts every story far outside its training range; here age counts
+    from the newest story in the dataset, the kindest reading of v1.
+    """
+    age_days = np.floor((index.as_of - index.published) / 86_400.0)
+
+    def policy(profile: Profile, k: int) -> list[int]:
+        language = profile.languages[0] if profile.languages else "english"
+        stated = np.array([key in profile.categories for key in index.category_keys], dtype=float)
+        match = (
+            (index.language_id == index.languages.index(language)).astype(float)
+            if language in index.languages
+            else np.zeros(index.size)
+        )
+        features = np.column_stack(
+            [
+                np.full(index.size, 1.0 if language == "english" else 2.0),
+                match,
+                index.category_matrix @ stated,
+                age_days,
+            ]
+        )
+        score = np.asarray(model.predict(features), dtype=float)
+        score[~_unread(index, profile)] = -np.inf
+        return np.argsort(-score, kind="stable")[:k].tolist()
+
+    return policy
+
+
+def load_v1_model(path: str) -> Any:
+    """Unpickle v1's ``trained_model.pkl`` (needs ``pip install xgboost``).
+
+    Only load a file you trust: unpickling runs code.
+    """
+    import pickle
+
+    try:
+        with open(path, "rb") as handle:
+            return pickle.load(handle)
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(f"Loading the v1 model needs {exc.name}: pip install xgboost") from exc
+
+
 def recency_policy(index: CorpusIndex) -> Policy:
     def policy(profile: Profile, k: int) -> list[int]:
         allowed = np.isin(index.language_id, [index.languages.index(x) for x in profile.languages])
@@ -168,15 +231,21 @@ def random_policy(index: CorpusIndex, seed: int = 0) -> Policy:
 
 
 def default_policies(
-    index: CorpusIndex, config: RankingConfig | None = None, now: float = 0.0
+    index: CorpusIndex, config: RankingConfig | None = None, now: float = 0.0, v1_model: Any = None
 ) -> dict[str, Policy]:
+    """Fanlight and its baselines. Without v1's trained model, v1 is stood in for
+    by the formula its training labels were generated from."""
     config = config or RankingConfig()
     return {
         "fanlight": fanlight_policy(index, config, now),
         "fanlight, no variety or discovery": fanlight_policy(
             index, replace(config, diversity=0.0, discovery=0.0), now
         ),
-        "v1 label formula": v1_policy(index),
+        **(
+            {"v1 trained model": v1_model_policy(index, v1_model)}
+            if v1_model is not None
+            else {"v1 label formula": v1_policy(index)}
+        ),
         "newest first": recency_policy(index),
         "random": random_policy(index),
     }
@@ -197,9 +266,11 @@ def _feed_metrics(
     total = sum(categories.values())
     entropy = -sum((c / total) * math.log2(c / total) for c in categories.values()) if total else 0.0
     shown = {key for i in feed for key in index.article(i).categories}
+    unstated = set(persona.taste) - {persona.stated}
     return {
         "ndcg": _dcg(got) / ideal if ideal > 0 else 0.0,
         "precision": sum(g > 0 for g in got) / max(len(feed), 1),
+        "unstated_found": len(shown & unstated) / len(unstated) if unstated else 0.0,
         "interest_recall": len(shown & set(persona.taste)) / len(persona.taste),
         "category_entropy": entropy,
         "sources": float(len({index.article(i).source for i in feed if index.article(i).source})),
@@ -209,7 +280,7 @@ def _feed_metrics(
 
 def simulate(
     index: CorpusIndex,
-    n_readers: int = 40,
+    n_readers: int = 60,
     rounds: int = 6,
     feed_size: int = 20,
     seed: int = 0,
@@ -303,7 +374,7 @@ def format_report(report: dict[str, Any]) -> str:
         f"Simulated readers: {report['readers']}, feed size {report['feed_size']}, "
         f"{last} rounds of feedback (seed {report['seed']})",
         "",
-        f"{'policy':<34}{'nDCG start':>11}{'nDCG end':>10}{'opens/reader':>14}{'interests found':>17}"
+        f"{'policy':<34}{'nDCG start':>11}{'nDCG end':>10}{'opens/reader':>14}{'unstated found':>16}"
         f"{'cat. entropy':>14}{'outlets':>9}{'median age h':>14}",
     ]
     for name, rows in report["policies"].items():
@@ -311,7 +382,77 @@ def format_report(report: dict[str, Any]) -> str:
         opens = sum(row.get("opens", 0.0) for row in rows)
         lines.append(
             f"{name:<34}{first['ndcg']:>11.3f}{final['ndcg']:>10.3f}{opens:>14.1f}"
-            f"{final['interest_recall']:>17.2f}{final['category_entropy']:>14.2f}"
+            f"{final['unstated_found']:>16.2f}{final['category_entropy']:>14.2f}"
             f"{final['sources']:>9.1f}{final['median_age_hours']:>14.1f}"
         )
+    return "\n".join(lines)
+
+
+#: Headline numbers summarised across seeds: (label, how to read it from one report).
+SEED_METRICS: dict[str, Callable[[list[dict[str, float]]], float]] = {
+    "nDCG start": lambda rows: rows[0]["ndcg"],
+    "nDCG end": lambda rows: rows[-1]["ndcg"],
+    "opens/reader": lambda rows: sum(row.get("opens", 0.0) for row in rows),
+    "unstated found": lambda rows: rows[-1]["unstated_found"],
+    "cat. entropy": lambda rows: rows[-1]["category_entropy"],
+    "median age h": lambda rows: rows[-1]["median_age_hours"],
+}
+
+
+def simulate_seeds(
+    index: CorpusIndex,
+    seeds: list[int],
+    policy_factory: Callable[[], dict[str, Policy]] | None = None,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Run :func:`simulate` once per seed (new readers and behaviour each time)
+    and summarise the headline numbers as mean, sample standard deviation and range.
+
+    ``policy_factory`` builds fresh policies for every seed, so stateful ones
+    (the random baseline) restart each time.
+    """
+    if not seeds:
+        raise ValueError("need at least one seed")
+    started = time.perf_counter()
+    runs = [
+        simulate(index, seed=seed, policies=policy_factory() if policy_factory else None, **kwargs)
+        for seed in seeds
+    ]
+    summary: dict[str, dict[str, dict[str, float]]] = {}
+    for name in runs[0]["policies"]:
+        summary[name] = {}
+        for label, read in SEED_METRICS.items():
+            values = np.array([read(run["policies"][name]) for run in runs], dtype=float)
+            summary[name][label] = {
+                "mean": round(float(values.mean()), 4),
+                "sd": round(float(values.std(ddof=1)) if len(values) > 1 else 0.0, 4),
+                "min": round(float(values.min()), 4),
+                "max": round(float(values.max()), 4),
+            }
+    return {
+        "seeds": list(seeds),
+        "readers": runs[0]["readers"],
+        "rounds": runs[0]["rounds"],
+        "feed_size": runs[0]["feed_size"],
+        "summary": summary,
+        "runs": runs,
+        "seconds": round(time.perf_counter() - started, 1),
+    }
+
+
+def format_seed_report(report: dict[str, Any]) -> str:
+    """Mean and standard deviation across seeds for each policy."""
+    seeds = report["seeds"]
+    lines = [
+        f"{len(seeds)} seeds ({', '.join(map(str, seeds))}), {report['readers']} readers each, "
+        f"feed size {report['feed_size']}, {report['rounds']} rounds. Mean and standard deviation across seeds.",
+        "",
+        f"{'policy':<34}" + "".join(f"{label:>18}" for label in SEED_METRICS),
+    ]
+    for name, metrics in report["summary"].items():
+        cells = []
+        for label, stats in metrics.items():
+            digits = 1 if label in ("opens/reader", "median age h") else 3
+            cells.append(f"{stats['mean']:.{digits}f} ± {stats['sd']:.{digits}f}".rjust(18))
+        lines.append(f"{name:<34}" + "".join(cells))
     return "\n".join(lines)

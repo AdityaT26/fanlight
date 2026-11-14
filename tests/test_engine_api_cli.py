@@ -123,7 +123,7 @@ def test_simulation_v2_finds_unstated_interests(index):
     report = simulate(index, n_readers=12, rounds=3, feed_size=10, seed=1)
     policies = report["policies"]
     v2 = policies["fanlight"]
-    assert v2[-1]["interest_recall"] > policies["v1 label formula"][-1]["interest_recall"]
+    assert v2[-1]["unstated_found"] > policies["v1 label formula"][-1]["unstated_found"]
     assert v2[-1]["ndcg"] > policies["random"][-1]["ndcg"]
     assert v2[-1]["ndcg"] > policies["newest first"][-1]["ndcg"]
     assert v2[-1]["category_entropy"] > policies["fanlight, no variety or discovery"][-1]["category_entropy"]

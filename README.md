@@ -4,11 +4,12 @@
 
 <p align="center">
   <b>A personalised news feed that shows its working.</b><br>
-  Today's news from 20 feeds in English and Hindi, ranked for each reader. Every story says why it is there, the feed learns from what you read and keeps some room for what you don't.
+  Today's news from 20 feeds in English and Hindi, ranked for each reader. Every story says why it is there, the feed learns from what you read and keeps some room for what you don't.<br>
+  In a simulation of 60 readers on 10,051 real stories, it is still serving relevant stories after six rounds (0.72, mean of five seeds), where the trained v1 model falls to 0.33. <a href="#results">How it is measured</a>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/tests-95%20passing-D9B46A" alt="95 tests passing">
+  <img src="https://img.shields.io/badge/tests-100%20passing-D9B46A" alt="100 tests passing">
   <img src="https://img.shields.io/badge/licence-MIT-D9B46A" alt="MIT licence">
   <img src="https://img.shields.io/badge/python-3.10%2B-6B4B94" alt="Python 3.10+">
   <img src="https://img.shields.io/badge/API-FastAPI-6B4B94" alt="FastAPI">
@@ -20,6 +21,48 @@
 </p>
 
 A fanlight is the half-round window over an art-deco door, with bars fanning out like sunrays. It lets light into the room. That is the idea here: a recommender you can see into, rather than a black box that decides what you read.
+
+## Results
+
+There is no click log for the dataset, so `fanlight evaluate` simulates readers. Each has a hidden taste of two to four categories and tells the ranker only one, then reacts to six feeds in a row. Every number below is the mean of five seeds, with one standard deviation across seeds after the ±.
+
+<p align="center"><img src="docs/screens/results.png" alt="Feed relevance over six rounds, mean of five seeds: Fanlight holds 0.72, the v1 model falls to 0.33" width="100%"></p>
+
+| 10,051 real stories, 60 readers, 5 seeds | Relevance, first feed | Relevance after six rounds | Opens per reader | Unstated interests found | Median story age |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| **Fanlight** | 0.91 ± 0.00 | **0.72 ± 0.03** | 55.8 ± 0.8 | **41% ± 2** | 5 days |
+| Fanlight, variety and discovery off | 1.00 ± 0.00 | 0.73 ± 0.05 | 59.0 ± 0.9 | 30% ± 4 | 5 days |
+| v1 (trained XGBoost model) | 0.99 ± 0.01 | 0.33 ± 0.04 | 48.2 ± 1.4 | 5% ± 2 | 36 days |
+| Newest first | 0.16 ± 0.01 | 0.03 ± 0.01 | 5.9 ± 0.6 | 29% ± 2 | 9 hours |
+| Random, last 14 days | 0.15 ± 0.01 | 0.15 ± 0.01 | 10.5 ± 0.3 | 69% ± 7 | 7 days |
+
+v1 matched the stated category well on day one but never learned, so after six rounds it was serving stories more than a month old and had surfaced almost none of the interests readers kept to themselves. Variety and discovery cost about 5% of opens and raise unstated interests found from 30% to 41%; on relevance after six rounds the two Fanlight variants are within noise of each other. The text index is checked on its own as well: 58% of a story's ten nearest neighbours share its category, against 9% by chance.
+
+### How the simulation is built
+
+- **Readers.** 60 per seed. Each gets two to four categories with strengths 1.0, 0.7, 0.5 and 0.35, drawn from categories with at least 25 stories in the reader's language in the last 14 days, and tells the ranker only the strongest one. Languages are drawn in proportion to the corpus.
+- **Behaviour.** The reader acts on six 20-story feeds, and the seventh, built from everything it did, is the one scored as "after six rounds". The reader looks at slot *p* with probability 0.95<sup>*p*−1</sup>, opens a story it looks at with probability 0.9 × its relevance, hides an irrelevant one with probability 0.1, and every story it looks at is logged as an impression.
+- **Ground truth.** The dataset's editorial category labels, never the text features the ranker sees, so the ranker can't grade its own work. Anything older than 14 days or in another language counts as irrelevant.
+- **Metrics.** *Relevance* is nDCG@20 with graded gains: a story's gain is the reader's hidden strength for its best-matching category, DCG sums gain / log<sub>2</sub>(position + 1), and the ideal is the best 20-story feed that could still be built from stories the reader hasn't opened, liked, saved or hidden. *Unstated interests found* is the share of the categories the reader never stated that appear at least once in that seventh feed. *Opens per reader* is the total across the six feeds the reader acts on. *Median story age* is for the same feed, measured from the newest story in the dataset.
+- **Baselines.** v1's original `trained_model.pkl`, scored on the four features v1 built (reader language, language match, stated-category overlap, story age), with age counted from the newest story rather than the wall clock, which is the kindest reading of v1. Then newest first, random from the last 14 days and Fanlight with variety and discovery off. Every policy faces the same readers, each with the same random seed.
+
+### Reproduce it
+
+```bash
+pip install xgboost                                         # only for the v1 baseline
+fanlight evaluate --v1-model trained_model.pkl --seeds 5    # the table and chart: seeds 0 to 4
+fanlight evaluate --v1-model trained_model.pkl              # one run, seed 0
+fanlight evaluate --demo                                    # synthetic newsroom, no data needed
+```
+
+The first three need the dataset export in `data/`, and `--v1-model` needs v1's `trained_model.pkl`; without it, v1 is stood in for by the formula its training labels were generated from. A seed always gives the same numbers. On a 2-core cloud VM one seed takes about 30 seconds and five about 2.5 minutes, plus about 20 seconds to build the index the first time.
+
+### What this can't tell you
+
+- The simulated readers want categories, and Fanlight has a category signal, so the setup favours a ranker that tracks categories. It shows the ranker learns and doesn't go stale. It doesn't show that real readers would prefer it.
+- Random finds the most unstated interests (69%) because it spreads across every category, and its relevance is near zero (0.15). That column only means something next to relevance.
+- Single runs mislead. Seed 0 happened to be Fanlight's best seed (0.75) and v1's worst (0.27); over five seeds it is 0.72 ± 0.03 against 0.33 ± 0.04. Five seeds is still a small sample for estimating the spread.
+- Simulated readers are a sanity check, not a replacement for an A/B test. Every interaction the app records lands in an event log, which is the data that test would need.
 
 ## Read today's news
 
@@ -82,24 +125,6 @@ The text index keeps Devanagari words whole (the usual tokenizers split them at 
 On small screens the feed goes single column and the reader, tuning and feed-shape panels become bottom sheets.
 
 <p align="center"><img src="docs/screens/phone.png" alt="Phone layout: feed, explanation and the reader sheet" width="100%"></p>
-
-## Results
-
-There is no click log for the dataset, so `fanlight evaluate` simulates readers. Each has a hidden taste of two to four categories and tells the ranker only one. For six rounds they scan a 20-story feed with attention that falls off down the page, open stories in proportion to how much they care, and now and then hide one that misses. The ground truth uses the dataset's editorial category labels, never the text features the ranker sees, and anything older than 14 days counts as stale.
-
-<p align="center"><img src="docs/screens/results.png" alt="Feed relevance over six rounds: Fanlight holds 0.75, the v1 model falls to 0.27" width="100%"></p>
-
-| On 10,051 real stories, 60 readers | Relevance, first feed | Relevance, round 6 | Opens per reader | Unstated interests found | Median story age |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| **Fanlight** | 0.91 | **0.75** | 56.1 | **51%** | **5 days** |
-| Fanlight, variety and discovery off | 1.00 | 0.75 | 59.6 | 37% | 6 days |
-| v1 (trained XGBoost model) | 0.99 | 0.27 | 46.3 | 38% | 38 days |
-| Newest first | 0.16 | 0.04 | 6.2 | 28% | 11 hours |
-| Random, last 14 days | 0.14 | 0.15 | 10.6 | 67% | 7 days |
-
-v1 matched the stated category well on day one but never learned, so by round six it was serving stories more than a month old. Variety and discovery cost about 6% of opens and find 38% more of the interests the reader never mentioned. The text index is checked on its own as well: 58% of a story's ten nearest neighbours share its category, against 9% by chance.
-
-Simulated readers are a sanity check of behaviour, not a replacement for an A/B test. Every interaction the app records lands in an event log, which is exactly the data that test would need.
 
 ## Quick start
 
@@ -190,7 +215,7 @@ fanlight readers                  # list readers
 fanlight create-reader Aditi --category politics --category technology
 fanlight feed r_1a2b3c4d5e -k 15  # ranked feed with reasons, in the terminal
 fanlight feed u_0281362149 --json
-fanlight evaluate                 # the simulation behind the results above
+fanlight evaluate --seeds 5       # the simulation behind the results above
 fanlight demo-data ./demo         # write the synthetic dataset as JSON
 fanlight serve --host 0.0.0.0 --port 8000
 ```
@@ -238,8 +263,7 @@ fanlight/
   synth.py        synthetic newsroom for tests and --demo
   api.py, cli.py  FastAPI app and command line
   web/static/     the web app: plain HTML, CSS and JavaScript, fonts self-hosted
-tests/            95 tests: live feeds against a local feed server, browser tests at desktop and phone sizes
-scripts/          comparison against the v1 model
+tests/            100 tests: live feeds against a local feed server, browser tests at desktop and phone sizes
 ```
 
 ## Development

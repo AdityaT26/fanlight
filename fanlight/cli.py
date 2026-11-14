@@ -193,13 +193,36 @@ def cmd_feed(args: argparse.Namespace) -> int:
 
 
 def cmd_evaluate(args: argparse.Namespace) -> int:
-    from .evaluation import format_report, representation_check, simulate
+    from .evaluation import (
+        default_policies,
+        format_report,
+        format_seed_report,
+        load_v1_model,
+        representation_check,
+        simulate,
+        simulate_seeds,
+    )
 
     engine = _engine(args)
-    report = simulate(
-        engine.index, n_readers=args.readers, rounds=args.rounds, feed_size=args.k, seed=args.seed
-    )
-    report["representation"] = representation_check(engine.index)
+    index = engine.index
+    v1_model = load_v1_model(args.v1_model) if args.v1_model else None
+    options = {"n_readers": args.readers, "rounds": args.rounds, "feed_size": args.k}
+
+    def policies():
+        return default_policies(index, now=index.as_of, v1_model=v1_model)
+
+    if args.seeds > 1:
+        seeds = list(range(args.seed, args.seed + args.seeds))
+        report = simulate_seeds(index, seeds, policy_factory=policies, **options)
+        if args.json:
+            print(json.dumps(report, indent=2))
+        else:
+            print(format_seed_report(report))
+            print(f"Took {report['seconds']:.0f} s.")
+        return 0
+
+    report = simulate(index, seed=args.seed, policies=policies(), **options)
+    report["representation"] = representation_check(index)
     if args.json:
         print(json.dumps(report, indent=2))
         return 0
@@ -210,6 +233,7 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
             f"\nText index: {rep['agreement']:.0%} of each story's {rep['neighbours']} nearest "
             f"neighbours share its category (chance: {rep['chance']:.0%})."
         )
+    print(f"Took {report['seconds']:.0f} s.")
     return 0
 
 
@@ -289,10 +313,16 @@ def build_parser() -> argparse.ArgumentParser:
     feed.add_argument("--no-colour", action="store_true")
 
     evaluate = add("evaluate", cmd_evaluate, "Compare ranking policies with simulated readers")
-    evaluate.add_argument("--readers", type=int, default=40)
+    evaluate.add_argument("--readers", type=int, default=60)
     evaluate.add_argument("--rounds", type=int, default=6)
     evaluate.add_argument("-k", type=int, default=20)
-    evaluate.add_argument("--seed", type=int, default=0)
+    evaluate.add_argument("--seed", type=int, default=0, help="first seed (readers and their behaviour)")
+    evaluate.add_argument(
+        "--seeds", type=int, default=1, help="run this many consecutive seeds and report mean ± sd"
+    )
+    evaluate.add_argument(
+        "--v1-model", help="v1's trained_model.pkl, to score the real v1 model (needs xgboost)"
+    )
     evaluate.add_argument("--json", action="store_true")
 
     demo = add("demo-data", cmd_demo_data, "Write the synthetic dataset as JSON files", data=False)
